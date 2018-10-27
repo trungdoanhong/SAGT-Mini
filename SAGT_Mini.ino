@@ -51,7 +51,7 @@
 struct TimeInDay
 {
 	uint8_t Hour = 7;
-	uint8_t Minute = 0;
+	uint8_t Minute = 30;
 };
 
 struct Tree
@@ -64,8 +64,8 @@ struct Tree
 
 struct Garden
 {
-	uint8_t Length;
-	uint8_t Data[30] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	uint8_t Length = 6;
+	uint8_t Data[30] = {0, 0, 0, 0, 0, 0};
 } GardenTower;
 
 SerialCommand serialCMD;
@@ -80,14 +80,14 @@ int32_t JumpSteps[2] = {0, 0};
 int8_t Direction[2] = { LEFT, LEFT };
 int16_t Speed[2] = { 400 , 800 };
 
-char TreeInfos[3][20];
-char GardenInfo[30];
+char TreeInfos[3][20] = {"7:30;1;20", "7:30;1;20", "7:30;1;20"};
+char GardenInfo[30] = {"012012"};
 
-char UpdateTimeString[10];
+char UpdateTimeString[10] = "15:30";
 
 float PotIndex;
 
-uint32_t UpdatePoint;
+uint32_t UpdatePoint = 0;
 TimeInDay UpdateTime;
 
 void setup()
@@ -99,13 +99,13 @@ void setup()
 	VirtualTimer.Init();
 	VirtualTimer.Run();
 
-	InitPosition();
+	//InitPosition();
 
 	serialCMD = SerialCommand(&Serial, 9600);
  
 	serialCMD.AddCommand("t1", TreeInfos[0]);
 	serialCMD.AddCommand("t2", TreeInfos[1]);
-	serialCMD.AddCommand("t2", TreeInfos[2]);
+	serialCMD.AddCommand("t3", TreeInfos[2]);
 	serialCMD.AddCommand("g", GardenInfo);
 	serialCMD.AddCommand("p", &PotIndex);
   serialCMD.AddCommand("water", Water);
@@ -290,10 +290,9 @@ void UpdateData()
 {
 	for (int i = 0; i < 3; i++)
 	{
-		ParseTreeData(String(TreeInfos[i]), Trees[i]);
+		ParseTreeData(i);
 
-    Serial.println(Trees[i].TimeToWater.Hour);
-    Serial.println(Trees[i].TimeToWater.Minute);
+    Serial.println(String(Trees[i].TimeToWater.Hour) + ":" + String(Trees[i].TimeToWater.Minute));
     Serial.println(Trees[i].DaySpace);
     Serial.println(Trees[i].IntervalToWater);
 	}
@@ -308,16 +307,18 @@ void UpdateData()
 
 	ParseTimeData();
 
+  Serial.println();
   Serial.println(UpdateTime.Hour);
   Serial.println(UpdateTime.Minute);
 }
 
-void ParseTreeData(String s, Tree tree)
+void ParseTreeData(uint8_t index)
 {
 	String hour;
 	String min;
 	String spaceDay;
 	String interval;
+  String s = String(TreeInfos[index]);
 
 	uint8_t semicon[2];
 
@@ -331,10 +332,10 @@ void ParseTreeData(String s, Tree tree)
 	spaceDay = s.substring(semicon[0] + 1, semicon[1]);
 	interval = s.substring(semicon[1] + 1);
 
-	tree.TimeToWater.Hour = hour.toInt();
-	tree.TimeToWater.Minute = min.toInt();
-	tree.DaySpace = spaceDay.toInt();
-	tree.IntervalToWater = interval.toInt();	
+	Trees[index].TimeToWater.Hour = hour.toInt();
+	Trees[index].TimeToWater.Minute = min.toInt();
+	Trees[index].DaySpace = spaceDay.toInt();
+	Trees[index].IntervalToWater = interval.toInt();	
 }
 
 void ParseTimeData()
