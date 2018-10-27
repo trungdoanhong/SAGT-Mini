@@ -19,20 +19,21 @@
 #define HUM_SENSOR_ANA A0
 
 #define PUMP_RELAY 11
+#define LED        13
 
 #define Z_ENDSTOP 12
-#define R_ENDSTOP 13
+#define R_ENDSTOP A3
 
 #define ARM_SERVO_OPEN 180
 #define ARM_SERVO_CLOSE 0
-#define HAND_SERVO_OPEN 85
-#define HAND_SERVO_CLOSE 180
+#define HAND_SERVO_OPEN 180
+#define HAND_SERVO_CLOSE 85
 
 
 #define DISTANCE_FOR_READING_HUM 50
-#define FLOOR_SPACE				 20
-#define Z_OFFSET				 50
-#define ANGLE_OFFSET			 60
+#define FLOOR_SPACE				 200
+#define Z_OFFSET				 80
+#define ANGLE_OFFSET			 0
 
 #define Z		0
 #define R		1
@@ -40,13 +41,12 @@
 #define RIGHT	-1
 #define LEFT	1
 
-#define ON		HIGH
-#define OFF		LOW
+#define ON		1
+#define OFF		0
 
-#define STEPS_MM	      40
-#define STEPS_ROUND		  200
+#define STEPS_MM	      8.5f
+#define STEPS_ROUND		  1600
 #define ROTATION_RATIO    2.5
-#define MM_ROUND		  70
 
 struct TimeInDay
 {
@@ -65,7 +65,7 @@ struct Tree
 struct Garden
 {
 	uint8_t Length;
-	uint8_t Data[30];
+	uint8_t Data[30] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 } GardenTower;
 
 SerialCommand serialCMD;
@@ -73,12 +73,12 @@ SerialCommand serialCMD;
 Servo HandServo;
 Servo ArmServo;
 
-int32_t DesiredPos[2];
-int32_t CurrentPos[2];
+int32_t DesiredPos[2] = {0, 0};
+int32_t CurrentPos[2] = {0, 0};
 
-int32_t JumpSteps[2];
+int32_t JumpSteps[2] = {0, 0};
 int8_t Direction[2] = { LEFT, LEFT };
-int8_t Speed[2] = { 200 , 200 };
+int16_t Speed[2] = { 400 , 800 };
 
 char TreeInfos[3][20];
 char GardenInfo[30];
@@ -92,6 +92,8 @@ TimeInDay UpdateTime;
 
 void setup()
 {
+  Serial.begin(9600);
+  
 	InitIO();
 
 	VirtualTimer.Init();
@@ -100,16 +102,17 @@ void setup()
 	InitPosition();
 
 	serialCMD = SerialCommand(&Serial, 9600);
+ 
 	serialCMD.AddCommand("t1", TreeInfos[0]);
 	serialCMD.AddCommand("t2", TreeInfos[1]);
 	serialCMD.AddCommand("t2", TreeInfos[2]);
 	serialCMD.AddCommand("g", GardenInfo);
 	serialCMD.AddCommand("p", &PotIndex);
+  serialCMD.AddCommand("water", Water);
 	serialCMD.AddCommand("time", UpdateTimeString);
 	serialCMD.AddCommand("move", MoveToPot);
 	serialCMD.AddCommand("update", UpdateData);
-	serialCMD.AddCommand("w", Water);
-	serialCMD.AddCommand("m", MeasureSoil);
+	serialCMD.AddCommand("measure", MeasureSoil);
 }
 
 void loop()
@@ -143,6 +146,7 @@ void InitIO()
 	digitalWrite(DIR_Z, LOW);
 
 	digitalWrite(PUMP_RELAY, OFF);
+  digitalWrite(LED, OFF);
 
 	Direction[Z] = LEFT;
 	Direction[R] = LEFT;
@@ -150,25 +154,36 @@ void InitIO()
 
 void InitPosition()
 {
-	HandServo.write(HAND_SERVO_CLOSE);
-	ArmServo.write(ARM_SERVO_CLOSE);	
+	Home();
+}
 
-	MoveTo(Z, 100000, 200);
-	MoveTo(R, 100000, 200);
+void Home()
+{
+	HandServo.write(HAND_SERVO_CLOSE);
+	delay(500);
+	ArmServo.write(ARM_SERVO_CLOSE);
+	delay(500);
+
+	CurrentPos[R] = 100000;
+	CurrentPos[Z] = 100000;
+
+	MoveTo(R, 0, 800);
 
 	while (!IsEndstopActive(R_ENDSTOP))
 	{
-		
 	}
 
 	StopAxis(R);
+	MoveTo(Z, 0, 400);
 
 	while (!IsEndstopActive(Z_ENDSTOP))
 	{
-
 	}
 
 	StopAxis(Z);
+
+	CurrentPos[R] = 0;
+	CurrentPos[Z] = 0;
 }
 
 bool IsEndstopActive(int endstopPin)
@@ -181,7 +196,7 @@ bool IsEndstopActive(int endstopPin)
 
 void PushPulseRotateStepper()
 {
-	if (CurrentPos[R] == JumpSteps[R])
+	if (CurrentPos[R] == DesiredPos[R])
 		VirtualTimer.Stop(PushPulseRotateStepper);
 
 	TOGGLE(STEP_R);
@@ -190,7 +205,7 @@ void PushPulseRotateStepper()
 
 void PushPulseZStepper()
 {
-	if (CurrentPos[Z] == JumpSteps[Z])
+	if (CurrentPos[Z] == DesiredPos[Z])
 		VirtualTimer.Stop(PushPulseZStepper);
 
 	TOGGLE(STEP_Z);
@@ -199,12 +214,15 @@ void PushPulseZStepper()
 
 void MoveZ(int16_t d)
 {
-	MoveTo(Z, d * STEPS_MM, 200);
+	MoveTo(Z, d * STEPS_MM, Speed[Z]);
 }
 
 void RotateTower(int angle)
 {
-	MoveTo(R, ((float)angle / 1.8f) * 2.5, 200);
+	uint32_t pulse = (((float)angle / 360) * STEPS_ROUND) * 2.5;
+	Serial.print("p: ");
+	Serial.println(pulse);
+	MoveTo(R, pulse, Speed[R]);
 }
 
 void MoveTo(uint8_t axis, int32_t pos, uint32_t speed)
@@ -214,16 +232,23 @@ void MoveTo(uint8_t axis, int32_t pos, uint32_t speed)
 	DesiredPos[axis] = pos;
 	JumpSteps[axis] = DesiredPos[axis] - CurrentPos[axis];
 
+	if (JumpSteps[axis] == 0)
+		return;
+
 	int dir = JumpSteps[axis] / abs(JumpSteps[axis]);
 
 	if (axis == R)
 	{
 		VirtualTimer.Change(PushPulseRotateStepper, duty);
+		VirtualTimer.Resum(PushPulseRotateStepper);
+
 		SetDirection(R, dir);
 	}
 	else
 	{
 		VirtualTimer.Change(PushPulseZStepper, duty);
+		VirtualTimer.Resum(PushPulseZStepper);
+
 		SetDirection(Z, dir);
 	}
 }
@@ -247,9 +272,9 @@ void SetDirection(uint8_t axis, int8_t dir)
 	uint8_t state;
 
 	if (dir > 0)
-		state = HIGH;
-	else
 		state = LOW;
+	else
+		state = HIGH;
 
 	if (axis == R)
 	{
@@ -266,6 +291,11 @@ void UpdateData()
 	for (int i = 0; i < 3; i++)
 	{
 		ParseTreeData(String(TreeInfos[i]), Trees[i]);
+
+    Serial.println(Trees[i].TimeToWater.Hour);
+    Serial.println(Trees[i].TimeToWater.Minute);
+    Serial.println(Trees[i].DaySpace);
+    Serial.println(Trees[i].IntervalToWater);
 	}
 
 	GardenTower.Length = strlen(GardenInfo);
@@ -273,9 +303,13 @@ void UpdateData()
 	for (int i = 0; i < GardenTower.Length; i++)
 	{
 		GardenTower.Data[i] = GardenInfo[i] - '0';
+    Serial.print(GardenTower.Data[i]);
 	}
 
 	ParseTimeData();
+
+  Serial.println(UpdateTime.Hour);
+  Serial.println(UpdateTime.Minute);
 }
 
 void ParseTreeData(String s, Tree tree)
@@ -315,24 +349,53 @@ void ParseTimeData()
 
 void Water()
 {
-	digitalWrite(PUMP_RELAY, ON);
-	
-	DelayS(Trees[GardenTower.Data[(int)PotIndex]].IntervalToWater);
-
-	digitalWrite(PUMP_RELAY, OFF);
+  Serial.println("Expand");
+  ArmServo.write(ARM_SERVO_OPEN);
+  delay(500);
+  HandServo.write(HAND_SERVO_CLOSE);
+  delay(500);
+  Serial.println("Spray");
+	//digitalWrite(PUMP_RELAY, ON);
+  digitalWrite(LED, ON);
+  
+  uint8_t treeId = GardenTower.Data[(int)PotIndex];
+  
+	delay(Trees[treeId].IntervalToWater * 1000);
+  
+	//digitalWrite(PUMP_RELAY, OFF);
+  digitalWrite(LED, OFF);
+  
+  ArmServo.write(ARM_SERVO_CLOSE);
+  Serial.println("Collapse");
 }
 
 void MeasureSoil()
 {
-	ArmServo.write(ARM_SERVO_OPEN);
-	MoveZ(50);
+	Serial.println("Expand");
+  ArmServo.write(ARM_SERVO_OPEN);
+  delay(2000);
+  HandServo.write(HAND_SERVO_OPEN);
+  delay(500);
+  Serial.println("Measure");
+  
+  uint16_t height = ((int)PotIndex / 3) * FLOOR_SPACE + Z_OFFSET;
+  MoveZ(height - 50);
 
-	DelayS(500);
+  delay(3000);
 
+  
 	uint16_t sensorValue = map(analogRead(HUM_SENSOR_ANA), 0, 1023, 0, 100);
 
 	Serial.print("m-");
-	Serial.println(sensorValue);
+	Serial.println(100 - sensorValue);
+  
+  MoveZ(height);
+  delay(500);
+  
+  HandServo.write(HAND_SERVO_CLOSE);
+  delay(500);
+  ArmServo.write(ARM_SERVO_CLOSE);
+  delay(1500);
 }
 
 void DelayS(uint32_t t)
@@ -347,9 +410,12 @@ void DelayS(uint32_t t)
 
 void MoveToPot()
 {
-	MoveZ((PotIndex / 3) * FLOOR_SPACE + Z_OFFSET);
+	uint16_t height = ((int)PotIndex / 3) * FLOOR_SPACE + Z_OFFSET;
+	int angle = (int)PotIndex % 3 * 120 + ANGLE_OFFSET;
+
+	MoveZ(height);
 	
-	RotateTower((int)PotIndex % 3 * 120 + ANGLE_OFFSET);
+	RotateTower(angle);
 }
 
 void CheckForWater()
